@@ -150,7 +150,7 @@
           </descriptorRefs>
           <archive>
             <manifest>
-              <mainClass>chk1g16_ty1g16.App</mainClass>
+              <mainClass>chk1g16_ty1g16.Run2</mainClass>
             </manifest>
           </archive>
         </configuration>
@@ -162,6 +162,14 @@
         <configuration>
           <downloadSources>true</downloadSources>
           <downloadJavadocs>true</downloadJavadocs>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <source>8</source>
+          <target>8</target>
         </configuration>
       </plugin>
     </plugins>
