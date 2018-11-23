@@ -3,6 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/CV_CW_run2.iml" filepath="$PROJECT_DIR$/CV_CW_run2.iml" />
+      <module fileurl="file://$PROJECT_DIR$/SceneRecognition_Run2/SceneRecognition_Run2.iml" filepath="$PROJECT_DIR$/SceneRecognition_Run2/SceneRecognition_Run2.iml" />
     </modules>
   </component>
 </project>
