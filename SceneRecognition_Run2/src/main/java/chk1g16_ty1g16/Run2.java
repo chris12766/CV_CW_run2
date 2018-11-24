@@ -28,28 +28,32 @@ import java.io.File;
 import java.io.IOException;
 import java.util.*;
 
-public class Run2 extends Main.Run{
+public class Run2 extends Run{
 
-    @Override
+    private static final String FVQ_CACHE = "run2_FVQ";
+
+    //train and run on test data, saving the results
     public void run() {
+        saveGuesses("run2.txt", trainAnnotator());
+    }
+
+    //train annotator on all available train data
+    protected LiblinearAnnotator<FImage, String> trainAnnotator() {
+        GroupedDataset<String, ListDataset<FImage>, FImage> test_data = null;
         int step = 8;
         int size = 4;
         DensePixelPatchSampler pixelSampler = new DensePixelPatchSampler(step, size);
-
         //construct a feature vector quantiser to map pixel patches to visual words
         HardAssigner<float[], float[], IntFloatPair> fvq =
-                getFeatureVectorQuantiser(Main.train_data, pixelSampler,30);
-
+                getFeatureVectorQuantiser(Main.train_data, pixelSampler, 30);
         //computes a spatial histogram for each image
         FeatureExtractor<DoubleFV, FImage> extractor = new DenseFeatureExtractor(fvq, pixelSampler);
-
         //construct and train one-vs-all linear classifiers (1 per image class)
         LiblinearAnnotator<FImage, String> annotator = new LiblinearAnnotator<FImage, String>(
                 extractor, LiblinearAnnotator.Mode.MULTICLASS,
                 SolverType.L2R_L2LOSS_SVC, 1.0, 0.00001);
         annotator.train(Main.train_data);
-
-        Main.saveGuesses(this, annotator);
+        return annotator;
     }
 
     private class DenseFeatureExtractor implements FeatureExtractor<DoubleFV, FImage> {
@@ -147,12 +151,12 @@ public class Run2 extends Main.Run{
     }
 
     private HardAssigner<float[], float[], IntFloatPair> getFeatureVectorQuantiser(
-            GroupedDataset<String, VFSListDataset<FImage>, FImage> groupedDataset,
+            GroupedDataset<String, ListDataset<FImage>, FImage> groupedDataset,
             DensePixelPatchSampler sampler, int numTrainSamples) {
         HardAssigner<float[], float[], IntFloatPair> fvq = null;
-        File fvqFile = new File(Main.FVQ_CACHE);
+        File fvqFile = new File(FVQ_CACHE);
 
-        System.out.println("Loading a Feature Vector Quantiser from: " + Main.FVQ_CACHE + "  ...");
+        System.out.println("Loading a Feature Vector Quantiser from: " + FVQ_CACHE + "  ...");
         if(fvqFile.exists()) {
             try {
                 fvq = IOUtils.readFromFile(fvqFile);
@@ -168,7 +172,7 @@ public class Run2 extends Main.Run{
             fvq = trainQuantiser(GroupedUniformRandomisedSampler.sample(groupedDataset, numTrainSamples), sampler);
             System.out.println("Training completed.");
             try {
-                System.out.println("Saving the Feature Vector Quantiser to: " + Main.FVQ_CACHE + "  ...");
+                System.out.println("Saving the Feature Vector Quantiser to: " + FVQ_CACHE + "  ...");
                 IOUtils.writeToFile(fvq, fvqFile);
                 System.out.println("Saving completed.");
             } catch (IOException e) {
