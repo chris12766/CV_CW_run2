@@ -1,11 +1,17 @@
 package chk1g16_ty1g16;
 
 import de.bwaldvogel.liblinear.SolverType;
+import org.apache.commons.lang.ArrayUtils;
 import org.openimaj.data.DataSource;
 import org.openimaj.data.dataset.GroupedDataset;
 import org.openimaj.data.dataset.ListDataset;
 import org.openimaj.data.dataset.VFSListDataset;
 import org.openimaj.experiment.dataset.sampling.GroupedUniformRandomisedSampler;
+import org.openimaj.experiment.dataset.split.GroupedRandomSplitter;
+import org.openimaj.experiment.evaluation.classification.ClassificationEvaluator;
+import org.openimaj.experiment.evaluation.classification.ClassificationResult;
+import org.openimaj.experiment.evaluation.classification.analysers.confusionmatrix.CMAnalyser;
+import org.openimaj.experiment.evaluation.classification.analysers.confusionmatrix.CMResult;
 import org.openimaj.feature.DoubleFV;
 import org.openimaj.feature.FeatureExtractor;
 import org.openimaj.feature.SparseIntFV;
@@ -24,38 +30,83 @@ import org.openimaj.ml.clustering.FloatCentroidsResult;
 import org.openimaj.ml.clustering.assignment.HardAssigner;
 import org.openimaj.ml.clustering.kmeans.FloatKMeans;
 import org.openimaj.util.pair.IntFloatPair;
+
+import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.*;
 
+/*
+Performs scene classification using a set of one-vs-all linear classifiers
+based on the bag-of-visual-words feature.
+ */
 public class Run2 extends Run{
 
-    private static final String FVQ_CACHE = "run2_FVQ";
+    private final String fvqCache = "run2_FVQ";
+    private LiblinearAnnotator<FImage, String> imageAnnotator;
+    private final String predictionsFilePath = "run2.txt";
 
-    //train and run on test data, saving the results
-    public void run() {
-        saveGuesses("run2.txt", trainAnnotator());
+    //classify an image
+    @Override
+    protected String predict(FImage image) {
+        return getTrainedAnnotator().classify(image).getPredictedClasses().toString();
     }
 
-    //train annotator on all available train data
-    protected LiblinearAnnotator<FImage, String> trainAnnotator() {
-        GroupedDataset<String, ListDataset<FImage>, FImage> test_data = null;
-        int step = 8;
-        int size = 4;
-        DensePixelPatchSampler pixelSampler = new DensePixelPatchSampler(step, size);
-        //construct a feature vector quantiser to map pixel patches to visual words
-        HardAssigner<float[], float[], IntFloatPair> fvq =
-                getFeatureVectorQuantiser(Main.train_data, pixelSampler, 30);
-        //computes a spatial histogram for each image
-        FeatureExtractor<DoubleFV, FImage> extractor = new DenseFeatureExtractor(fvq, pixelSampler);
-        //construct and train one-vs-all linear classifiers (1 per image class)
-        LiblinearAnnotator<FImage, String> annotator = new LiblinearAnnotator<FImage, String>(
-                extractor, LiblinearAnnotator.Mode.MULTICLASS,
-                SolverType.L2R_L2LOSS_SVC, 1.0, 0.00001);
-        annotator.train(Main.train_data);
-        return annotator;
+    @Override
+    protected String getPredictionsFilePath() {
+        return predictionsFilePath;
     }
 
+    //evaluate the performance of the model, training on 80% of the labelled data and testing on the other 20%
+    protected void evaluatePerformance() {
+        GroupedRandomSplitter<String, FImage> split_data =
+                new GroupedRandomSplitter<String, FImage>(
+                        Main.train_data, 80, 0, 20);
+        Main.train_data = split_data.getTrainingDataset();
+
+        LiblinearAnnotator<FImage, String> annotator = getTrainedAnnotator();
+
+        ClassificationEvaluator<CMResult<String>, String, FImage> eval =
+                new ClassificationEvaluator<CMResult<String>, String, FImage>(
+                        annotator, split_data.getTestDataset(), new CMAnalyser<FImage, String>(CMAnalyser.Strategy.SINGLE));
+
+        Map<FImage, ClassificationResult<String>> guesses = eval.evaluate();
+        CMResult<String> result = eval.analyse(guesses);
+
+        System.out.println(result.getSummaryReport());
+        System.out.println();
+        System.out.println(result.getDetailReport());
+    }
+
+    //train annotator on all available labelled data, or use a pre-trained one
+    private LiblinearAnnotator<FImage, String> getTrainedAnnotator() throws NullPointerException {
+        if(imageAnnotator == null) {
+            if (Main.train_data == null) {
+                throw new NullPointerException("No training data has been loaded!");
+            }
+            GroupedDataset<String, ListDataset<FImage>, FImage> test_data = null;
+            //sampling step in x and y directions
+            int step = 8;
+            //each sampled patch is size x size
+            int size = 4;
+            DensePixelPatchSampler pixelSampler = new DensePixelPatchSampler(step, size);
+            //construct a feature vector quantiser to map pixel patches to visual words
+            HardAssigner<float[], float[], IntFloatPair> fvq =
+                    getFeatureVectorQuantiser(Main.train_data, pixelSampler, 30);
+            //computes a spatial histogram for each image
+            FeatureExtractor<DoubleFV, FImage> extractor = new DenseFeatureExtractor(fvq, pixelSampler);
+            //construct and train one-vs-all linear classifiers (1 per image class)
+            LiblinearAnnotator<FImage, String> annotator = new LiblinearAnnotator<FImage, String>(
+                    extractor, LiblinearAnnotator.Mode.MULTICLASS,
+                    SolverType.L2R_L2LOSS_SVC, 1.0, 0.00001);
+            annotator.train(Main.train_data);
+            imageAnnotator = annotator;
+        }
+        return imageAnnotator;
+    }
+
+    //creates spatial bag-of-visual-words histograms for images
     private class DenseFeatureExtractor implements FeatureExtractor<DoubleFV, FImage> {
         HardAssigner<float[], float[], IntFloatPair> fvq;
         DensePixelPatchSampler pixelSampler;
@@ -74,7 +125,7 @@ public class Run2 extends Run{
             //construct spatial histograms
             BlockSpatialAggregator<float[], SparseIntFV> spatial =
                     new BlockSpatialAggregator<float[], SparseIntFV>(
-                                bovw, 2, 2);
+                                bovw, 2, 4);
 
 
             //append and normalise all spatial histograms for the image
@@ -83,6 +134,7 @@ public class Run2 extends Run{
         }
     }
 
+    //extracts the feature vectors of pixel patches that form a dense grid across the image
     private class DensePixelPatchSampler {
         private int step;
         private int size;
@@ -111,34 +163,25 @@ public class Run2 extends Run{
         // flatten subimage pixels into a feature vector
         private float[] getFeatureVector(FImage img) {
             float[] featureVector = new float[img.height*img.width];
-            int index = 0;
+
             for (int r = 0; r < img.height; r++ ) {
-                for (int c = 0; c < img.width; c++ ) {
-                    featureVector[index] = img.pixels[r][c];
-                    index++;
-                }
+                featureVector = ArrayUtils.addAll(featureVector, img.pixels[r]);
             }
             return featureVector;
         }
-
     }
 
+    //uses K-Means to map feature vectors to visual words
     private HardAssigner<float[], float[], IntFloatPair> trainQuantiser(
             GroupedDataset<String, ListDataset<FImage>, FImage> groupedDataset, DensePixelPatchSampler pixelSampler)
     {
-        List<LocalFeatureList<FloatKeypoint>> allKeys =
-                new ArrayList<LocalFeatureList<FloatKeypoint>>();
+        List<LocalFeatureList<FloatKeypoint>> allKeys = new ArrayList<LocalFeatureList<FloatKeypoint>>();
 
         int imagesProcessed = 0;
         for (FImage img : groupedDataset) {
-            //take the features of only a subset of the images
-            if (imagesProcessed >= 500) {
-                //break;
-            }
             allKeys.add(pixelSampler.getFloatKeypoints(img));
             imagesProcessed++;
         }
-
 
         DataSource<float[]> datasource =
                 new LocalFeatureListDataSource<FloatKeypoint, float[]>(allKeys);
@@ -150,13 +193,14 @@ public class Run2 extends Run{
         return result.defaultHardAssigner();
     }
 
+    //use cache FVQ if available, otherwise train a new one and save it
     private HardAssigner<float[], float[], IntFloatPair> getFeatureVectorQuantiser(
             GroupedDataset<String, ListDataset<FImage>, FImage> groupedDataset,
             DensePixelPatchSampler sampler, int numTrainSamples) {
         HardAssigner<float[], float[], IntFloatPair> fvq = null;
-        File fvqFile = new File(FVQ_CACHE);
+        File fvqFile = new File(fvqCache);
 
-        System.out.println("Loading a Feature Vector Quantiser from: " + FVQ_CACHE + "  ...");
+        System.out.println("Loading a Feature Vector Quantiser from: " + fvqCache + "  ...");
         if(fvqFile.exists()) {
             try {
                 fvq = IOUtils.readFromFile(fvqFile);
@@ -165,14 +209,13 @@ public class Run2 extends Run{
             }
         }
 
-
         if(fvq == null) {
             System.out.println("Loading failed.");
             System.out.println("Training new Feature Vector Quantiser ...");
             fvq = trainQuantiser(GroupedUniformRandomisedSampler.sample(groupedDataset, numTrainSamples), sampler);
             System.out.println("Training completed.");
             try {
-                System.out.println("Saving the Feature Vector Quantiser to: " + FVQ_CACHE + "  ...");
+                System.out.println("Saving the Feature Vector Quantiser to: " + fvqCache + "  ...");
                 IOUtils.writeToFile(fvq, fvqFile);
                 System.out.println("Saving completed.");
             } catch (IOException e) {
