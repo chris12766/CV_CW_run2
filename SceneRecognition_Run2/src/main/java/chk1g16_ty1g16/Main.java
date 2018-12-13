@@ -9,7 +9,7 @@ import java.io.IOException;
 import java.util.*;
 
 public class Main {
-    private static final String TRAIN_DATA_DIR = "C:\\Users\\chkar\\Desktop\\CV data\\training";
+    private static final String TRAIN_DATA_URL = "http://comp3204.ecs.soton.ac.uk/cw/training.zip";
     private static final String TEST_DATA_DIR = "C:\\Users\\chkar\\Desktop\\CV data\\testing";
 
     protected static GroupedDataset<String, ListDataset<FImage>, FImage> train_data;
@@ -18,17 +18,20 @@ public class Main {
 
     public static void main(String[] args) throws FileSystemException {
         loadData();
-        Run1 r = new Run1();
-        r.savePredictions();
+
+        //Run2 r2 = new Run2();
+        //r2.evaluatePerformance();
+
+        //Run1 run1 = new Run1();
+        //run1.evaluatePerformance();
     }
 
 
 
     private static void loadData() throws FileSystemException {
         //load training data
-        GroupedDataset<String, VFSListDataset<FImage>, FImage> dataset = new VFSGroupDataset<FImage>(
-                TRAIN_DATA_DIR,
-                ImageUtilities.FIMAGE_READER);
+        VFSGroupDataset<FImage> dataset =
+                new VFSGroupDataset<FImage>(TRAIN_DATA_URL, ImageUtilities.FIMAGE_READER);
 
         train_data = new MapBackedDataset<String, ListDataset<FImage>, FImage>();
         for (String groupName : dataset.getGroups()) {

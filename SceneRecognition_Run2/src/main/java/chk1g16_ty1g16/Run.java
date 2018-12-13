@@ -11,6 +11,8 @@ public abstract class Run{
     //classify one 1 image
     protected abstract String predict(FImage image);
     protected abstract String getPredictionsFilePath();
+    //checks the accuracy of the model
+    protected abstract void evaluatePerformance();
 
     //predict on the test data and save the predictions to txt file
     protected void savePredictions(){

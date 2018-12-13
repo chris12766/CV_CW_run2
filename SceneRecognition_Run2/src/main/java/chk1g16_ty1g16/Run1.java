@@ -2,29 +2,34 @@ package chk1g16_ty1g16;
 
 import com.google.common.collect.*;
 import org.openimaj.data.dataset.ListDataset;
+import org.openimaj.experiment.dataset.split.GroupedRandomSplitter;
 import org.openimaj.image.FImage;
 import java.util.*;
 import org.openimaj.data.dataset.GroupedDataset;
 import org.openimaj.feature.DoubleFV;
 import org.openimaj.feature.DoubleFVComparison;
 import org.openimaj.image.processing.resize.ResizeProcessor;
+import org.openimaj.knn.ObjectNearestNeighboursExact;
+import org.openimaj.util.pair.IntFloatPair;
 
 /*
 Performs image classification using the KNN algorithm based on the "tiny image" feature.
  */
 public class Run1 extends Run {
 
-    private final int K = 4; // k for the KNN algorithm
+    private int K = 2; // k for the KNN algorithm
     private final int tinyImageSize = 16; // width and height for resized tiny images
     private final String predictionsFilePath = "run1.txt";
-    private HashMap<String, ArrayList<DoubleFV>> trainClassNameToFVs;
+    private HashMap<Integer, String> imageIndextoClassName;
+    private List<DoubleFV> trainDataFVs;
 
 
     public Run1() throws NullPointerException {
         if (Main.train_data == null) {
             throw new NullPointerException("No training data has been loaded!");
         }
-        this.trainClassNameToFVs = getTinyImgFVs(Main.train_data);
+        this.imageIndextoClassName = new HashMap<>();
+        this.trainDataFVs = getTinyImgFVs(Main.train_data);
     }
 
     //classify one 1 image
@@ -39,75 +44,99 @@ public class Run1 extends Run {
     }
 
 
-    //classify one image using KNN algorithm
+    //classify one image using the KNN algorithm
     private String K_NN_Classify(FImage imgToClassify) {
         DoubleFV imgToClassifyFV = getTinyImageFeatureVector(imgToClassify);
 
-        //ordered in descending order
-        //allows for multiple classes with the same distance
-        TreeMultimap<Double, String> distanceToClasses =
-                                TreeMultimap.create(Ordering.natural().reverse(), Ordering.natural());
-        for (String trainClassName : trainClassNameToFVs.keySet()) {
-            for (DoubleFV featVector : trainClassNameToFVs.get(trainClassName)) {
-                //don't compare with itself in case the image is part of the training set
-                if (featVector.equals(imgToClassifyFV)) {
-                    continue;
-                }
+        //create the KNN classifier
+        ObjectNearestNeighboursExact<DoubleFV> nnExact = new ObjectNearestNeighboursExact<>(trainDataFVs, DoubleFVComparison.EUCLIDEAN);
+        //classify
+        List<IntFloatPair> finalList = nnExact.searchKNN(imgToClassifyFV, K);
 
-                // Calculate the euclidean distance
-                double distance = featVector.compare(imgToClassifyFV, DoubleFVComparison.EUCLIDEAN);
-                // Only keep 3 decimal places
-                distance = Math.round(distance * 1000d) / 1000d;
-                distanceToClasses.put(distance, trainClassName);
+        return imageIndextoClassName.get(findMostCommonClassIndex(finalList));
+    }
+
+    //returns the index of the most common class in the list
+    private int findMostCommonClassIndex(List<IntFloatPair> input) {
+        HashMap<Integer, Integer> classIndexToCount = new HashMap<>();
+
+        for (IntFloatPair a : input) {
+            int classIndex = a.first;
+
+            if (classIndexToCount.containsKey(classIndex)) {
+                classIndexToCount.put(classIndex, classIndexToCount.get(classIndex) + 1);
+            } else {
+                classIndexToCount.put(classIndex, 1);
             }
         }
 
-        //count number of neighbours belonging to each class
-        int i = 0;
-        HashMap<String, Integer> classNameToCount = new HashMap<>();
-        outerLoop:
-        for (Double distance : distanceToClasses.keySet()) {
-            for (String className : distanceToClasses.get(distance)) {
-                if (i == K) {
-                    break outerLoop;
-                }
-                if (classNameToCount.containsKey(className)) {
-                    classNameToCount.put(className, classNameToCount.get(className) + 1);
-                } else {
-                    classNameToCount.put(className, 1);
-                }
-                i++;
-            }
-        }
         //find the class with the most representatives in the neighbor set
-        String prediction = null;
+        int predictionIndex = 0;
         int predictionCount = 0;
-        for (String className : classNameToCount.keySet()) {
-            if (classNameToCount.get(className) > predictionCount) {
-                prediction = className;
-                predictionCount = classNameToCount.get(className);
+        for (Integer classIndex : classIndexToCount.keySet()) {
+            if (classIndexToCount.get(classIndex) > predictionCount) {
+                predictionIndex = classIndex;
+                predictionCount = classIndexToCount.get(classIndex);
             }
         }
 
-        return prediction;
+        return predictionIndex;
+    }
+
+    protected void evaluatePerformance() {
+        // Split the dataset to 80% for training and 20% for testing
+        GroupedRandomSplitter<String, FImage> split_data =
+                new GroupedRandomSplitter<String, FImage>(Main.train_data, 80, 0, 20);
+        GroupedDataset<String, ListDataset<FImage>, FImage> testData = split_data.getTestDataset();
+        this.trainDataFVs = getTinyImgFVs(split_data.getTrainingDataset());
+
+        double correct = 0;
+        double count = 0;
+        double bestAccuracy = 0;
+        int bestK = 0;
+
+        //experiment with different K's
+        for (int i = 1; i < 20; i++){
+            this.K = i;
+
+            for (String label : testData.keySet()) {
+                for (FImage fImage : testData.get(label)) {
+                    String prediction = predict(fImage);
+                    if (prediction.equals(label)) {
+                        correct++;
+                    }
+                    count++;
+                }
+            }
+
+            double accuracy = correct / count;
+            System.out.println("Value of K is: " + K);
+            System.out.println("Accuracy is: " + accuracy);
+            System.out.println();
+
+            if(bestAccuracy < accuracy){
+                bestAccuracy = accuracy;
+                bestK = K;
+            }
+        }
+
+        System.out.println("The optimal K is: " + bestK);
+        System.out.println("The best accuracy achieved is: " + bestAccuracy);
     }
 
     //turn all images to tiny images cropped around the centre and extract their feature vectors
-    private HashMap<String, ArrayList<DoubleFV>> getTinyImgFVs(GroupedDataset<String,
-            ListDataset<FImage>, FImage> trainingSet) {
-        HashMap<String, ArrayList<DoubleFV>> classNameToFVs =
-                                           new HashMap<String, ArrayList<DoubleFV>>();
-        
+    private ArrayList<DoubleFV> getTinyImgFVs(GroupedDataset<String, ListDataset<FImage>, FImage> trainingSet) {
+        ArrayList<DoubleFV> featVectors = new ArrayList<DoubleFV>();
+        int index = 0;
         for (String className : trainingSet.keySet()) {
-            ArrayList<DoubleFV> trainFeatVector = new ArrayList<DoubleFV>();
-
             for (FImage trainImage : trainingSet.get(className)) {
-                trainFeatVector.add(getTinyImageFeatureVector(trainImage));
-                classNameToFVs.put(className, trainFeatVector);
+                featVectors.add(getTinyImageFeatureVector(trainImage));
+                imageIndextoClassName.put(index, className);
+                index++;
             }
         }
-        
-        return classNameToFVs;
+
+        return featVectors;
     }
 
     //crop a tiny image around the centre of the passed image and extract its feature vector
