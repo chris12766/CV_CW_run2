@@ -17,7 +17,7 @@ Performs image classification using the KNN algorithm based on the "tiny image" 
  */
 public class Run1 extends Run {
 
-    private int K = 2; // k for the KNN algorithm
+    private int K = 3; // k for the KNN algorithm
     private final int tinyImageSize = 16; // width and height for resized tiny images
     private final String predictionsFilePath = "run1.txt";
     private HashMap<Integer, String> imageIndextoClassName;
